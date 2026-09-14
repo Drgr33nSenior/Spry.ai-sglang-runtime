@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "status": "separate-experimental-runtime-not-installer-compatible",
+  "sglang": {
+    "origin": "https://github.com/sgl-project/sglang.git",
+    "tag": "v0.5.15.post1",
+    "tag_object": "658e0a942ec771aeeef1b1adf4180764cacd79b2",
+    "commit": "0b3bb0cbe31873994c9f989fddfe2f87ca839fdd",
+    "tree": "433b8a748c891ba79876770dbdb36d4c08ab4472",
+    "git_archive_sha256": "4c2accaded940530512b4d7b92a352100541fd0aa3416f1bfb0c08ee078b478d",
+    "license": "Apache-2.0",
+    "patches": ["patches/0001-spry-uq.patch"],
+    "patch_sha256": {
+      "patches/0001-spry-uq.patch": "e63a91c316ca16d1f8d7e64341161e88b5cc79fd33e163d4ddd2d9bcf28f0b1d"
+    }
+  },
+  "installer_baseline": {
+    "versions_lock_sha256": "f2a39a52bca6133e57a28c1a2081f71e1ecf2736569b759814ef8676ecf97541",
+    "image": "docker.io/rocm/sgl-dev:v0.5.15.post1-ubuntu24.04-py3.14-rocm10.0.0@sha256:51f63a2d201ca944a43b8f1a18ac7da73ed9f6743c45bb82bbc40b44e6cf18d2",
+    "index_digest": "sha256:13171073ebf66fee0a1473d43ae8080cc7f8500fa213ddf1507f158fbb6dd63a",
+    "config_digest": "sha256:8474934b5049db5e3dbd9ee220e41b9d1a397a25ca0daac8a0b38850f2478495",
+    "source_layer": "sha256:c31ff2cd4a0364cfb637ffc627ddef4f0de7a2f415301ff2982b775b0f84d86f",
+    "reported_package": "0.5.15.post1+amd.march.ge35a33b34a",
+    "reported_python": "3.14",
+    "reported_torch": "2.12.0",
+    "reported_rocm": "10.0.0",
+    "rocm_source_url": "https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx120X-all-10.0.0.tar.gz",
+    "rocm_source_sha256": "eb99db434a1738fd83b0c3b933146cdb76418f35fcf4647743fbdfef76e8c71f",
+    "matching_public_source_files": {
+      "python/sglang/srt/server_args.py": "ad470ede790c2b5fdf13d82dbf24ea6821747b8a5c581e81224ed7603bc23710",
+      "python/sglang/srt/compilation/torch_compile_decoration.py": "77b1e38dba14788800b6b6351af1b5b8a80d9e42b91b57e9484ea4561d33a48c",
+      "python/sglang/srt/models/qwen3_5.py": "48a8e32043f1bcf711243152e53db5a1bdec0372913a28acd6fd59bc0feedf6b"
+    },
+    "full_source_relationship": "unknown"
+  },
+  "models_inspected": [
+    {
+      "repository": "Qwen/Qwen3.5-9B",
+      "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+      "config_sha256": "d0883072e01861ed0b2d47be3c16c36a8e81c224c7ffaa310c6558fb3f932b05",
+      "architecture": "Qwen3_5ForConditionalGeneration",
+      "head_dim": 256, "query_heads": 16, "kv_heads": 4,
+      "full_attention_layers": 8, "linear_attention_layers": 24,
+      "runtime_support": "refused-hybrid-model"
+    },
+    {
+      "repository": "Qwen/Qwen3.8-27B-FP8",
+      "revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+      "config_sha256": "74227dd615bf1ea975aa676bdf355a0379858c12f394b5365cd9dfa5fc2c70bc",
+      "architecture": "Qwen3_5ForConditionalGeneration",
+      "head_dim": 256, "query_heads": 24, "kv_heads": 4,
+      "full_attention_layers": 16, "linear_attention_layers": 48,
+      "runtime_support": "refused-hybrid-model-and-tp2"
+    }
+  ]
+}

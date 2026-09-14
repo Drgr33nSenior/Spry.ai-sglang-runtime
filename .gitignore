@@ -1,0 +1,7 @@
+/build/
+/cmake-build-*/
+/.sources/
+/.evidence/
+__pycache__/
+*.pyc
+/CMakeUserPresets.json

@@ -1,0 +1,25 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "cpu",
+      "displayName": "CPU reference (no ROCm required)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cpu",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "SPRY_BUILD_HIP": "OFF"}
+    },
+    {
+      "name": "gfx1201",
+      "displayName": "Compile gfx1201 with a prepared local ROCm toolchain",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/hip",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "SPRY_BUILD_HIP": "ON",
+        "CMAKE_HIP_ARCHITECTURES": "gfx1201"
+      }
+    }
+  ],
+  "buildPresets": [{"name": "cpu", "configurePreset": "cpu"}, {"name": "gfx1201", "configurePreset": "gfx1201"}],
+  "testPresets": [{"name": "cpu", "configurePreset": "cpu", "output": {"outputOnFailure": true}}]
+}

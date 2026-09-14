@@ -1,0 +1,169 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Spry UltraQuant experimental overlay <noreply@example.invalid>
+Date: Mon, 14 Sep 2026 00:00:00 +0000
+Subject: [PATCH] Add opt-in Spry-UQ compressed KV cache overlay
+
+Apply only to sgl-project/sglang commit
+0b3bb0cbe31873994c9f989fddfe2f87ca839fdd (v0.5.15.post1):
+
+    git apply --check patches/0001-spry-uq.patch
+    git apply patches/0001-spry-uq.patch
+
+Install the separately maintained ``spry_uq`` package into this copied source
+environment first. This patch has no effect unless
+``--spry-uq-backend=spry_uq_rdna4`` is selected.
+---
+ python/sglang/srt/mem_cache/allocator/token.py         |  3 +++
+ python/sglang/srt/mem_cache/allocator/paged.py         |  7 +++++++
+ python/sglang/srt/model_executor/model_runner.py       |  8 ++++++++
+ .../srt/model_executor/model_runner_kv_cache_mixin.py  | 21 ++++++++++++++++++++-
+ .../srt/model_executor/pool_configurator.py            |  9 +++++++++
+ python/sglang/srt/server_args.py                        | 25 +++++++++++++++++++++++++
+ 6 files changed, 73 insertions(+), 1 deletion(-)
+
+diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
+index 3049e6d..8360e20 100644
+--- a/python/sglang/srt/server_args.py
++++ b/python/sglang/srt/server_args.py
+@@ -568,6 +568,27 @@ class ServerArgs:
+             resolvable=True,
+         ),
+     ] = "auto"
++    spry_uq_backend: A[
++        str,
++        Arg(
++            help=(
++                "Experimental Spry UltraQuant-derived KV cache backend. "
++                "'spry_uq_rdna4' requires an explicit native library, a fresh "
++                "single-GPU HIP process, and both graph phases disabled."
++            ),
++            choices=["disabled", "spry_uq_rdna4"],
++        ),
++    ] = "disabled"
++    spry_uq_library_path: A[
++        Optional[str],
++        Arg(
++            help=(
++                "Path to the separately built Spry-UQ HIP shared library. "
++                "Required with --spry-uq-backend=spry_uq_rdna4."
++            ),
++            type_parser=nullable_str,
++        ),
++    ] = None
+     enable_fp32_lm_head: A[
+         bool, "If set, the LM head outputs (logits) are in FP32."
+     ] = False
+@@ -2812,6 +2833,10 @@ class ServerArgs:
+         from sglang.srt.arg_groups.overrides import materialize_declarations
+ 
+         materialize_declarations(self)
++        if self.spry_uq_backend != "disabled":
++            from spry_uq.sglang_backend import validate_spry_uq_server_args
++
++            validate_spry_uq_server_args(self)
+ 
+     def _handle_model_source_paths(self):
+         """Resolve model/tokenizer paths backed by remote object stores."""
+diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
+index ea17a25..1eb1f0b 100644
+--- a/python/sglang/srt/model_executor/model_runner.py
++++ b/python/sglang/srt/model_executor/model_runner.py
+@@ -2515,6 +2515,14 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+ 
+     def _get_attention_backend(self, init_new_workspace: bool = False):
+         """Init attention kernel backend."""
++        if self.server_args.spry_uq_backend == "spry_uq_rdna4":
++            if init_new_workspace:
++                raise RuntimeError("Spry-UQ does not support a graph workspace.")
++            from spry_uq.sglang_backend import SpryUQAttentionBackend
++
++            self.prefill_attention_backend_str = "spry_uq_rdna4"
++            self.decode_attention_backend_str = "spry_uq_rdna4"
++            return SpryUQAttentionBackend(self)
+         draft_attn_backend = self.server_args.speculative_draft_attention_backend
+         if self.is_draft_worker and draft_attn_backend:
+             logger.warning(
+diff --git a/python/sglang/srt/model_executor/model_runner_kv_cache_mixin.py b/python/sglang/srt/model_executor/model_runner_kv_cache_mixin.py
+index ef8ea85..dd33ed3 100644
+--- a/python/sglang/srt/model_executor/model_runner_kv_cache_mixin.py
++++ b/python/sglang/srt/model_executor/model_runner_kv_cache_mixin.py
+@@ -639,7 +639,26 @@ class ModelRunnerKVCacheMixin:
+             PageMajorMHATokenToKVPool if enable_page_major else MHATokenToKVPool
+         )
+ 
+-        if is_dsv4_model:
++        if self.server_args.spry_uq_backend == "spry_uq_rdna4":
++            from spry_uq.sglang_backend import validate_spry_uq_model_runner
++            from spry_uq.sglang_pool import SpryUQTokenToKVPool
++
++            validate_spry_uq_model_runner(self)
++            self.token_to_kv_pool = SpryUQTokenToKVPool(
++                self.max_total_num_tokens,
++                page_size=self.page_size,
++                dtype=self.kv_cache_dtype,
++                head_num=self.model_config.get_num_kv_heads(get_attention_tp_size()),
++                head_dim=self.model_config.head_dim,
++                v_head_dim=self.model_config.v_head_dim,
++                layer_num=self.num_effective_layers,
++                device=self.device,
++                enable_memory_saver=self.server_args.enable_memory_saver,
++                start_layer=self.start_layer,
++                end_layer=self.end_layer,
++                library_path=self.server_args.spry_uq_library_path,
++            )
++        elif is_dsv4_model:
+             swa_page_size = self.page_size
+             if not _is_npu:
+                 assert swa_page_size == 256, "In paged swa mode, page_size must be 256."
+diff --git a/python/sglang/srt/mem_cache/allocator/token.py b/python/sglang/srt/mem_cache/allocator/token.py
+index 990e468..6ef5b73 100644
+--- a/python/sglang/srt/mem_cache/allocator/token.py
++++ b/python/sglang/srt/mem_cache/allocator/token.py
+@@ -68,6 +68,9 @@ class TokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+             return
+ 
+         if self.is_not_in_free_group:
++            invalidate = getattr(self._kvcache, "invalidate", None)
++            if invalidate is not None:
++                invalidate(free_index)
+             if self.need_sort:
+                 self.release_pages = torch.cat((self.release_pages, free_index))
+             else:
+diff --git a/python/sglang/srt/mem_cache/allocator/paged.py b/python/sglang/srt/mem_cache/allocator/paged.py
+index 2531396..339eaba 100755
+--- a/python/sglang/srt/mem_cache/allocator/paged.py
++++ b/python/sglang/srt/mem_cache/allocator/paged.py
+@@ -264,6 +264,13 @@ class PagedTokenToKVPoolAllocator(BaseTokenToKVPoolAllocator):
+ 
+         if self.is_not_in_free_group:
+             free_page_indices = torch.unique(free_index // self.page_size)
++            invalidate = getattr(self._kvcache, "invalidate", None)
++            if invalidate is not None:
++                released_slots = (
++                    free_page_indices[:, None] * self.page_size
++                    + torch.arange(self.page_size, device=self.device)
++                ).reshape(-1)
++                invalidate(released_slots)
+             if self.need_sort:
+                 self.release_pages = torch.cat((free_page_indices, self.release_pages))
+             else:
+diff --git a/python/sglang/srt/model_executor/pool_configurator.py b/python/sglang/srt/model_executor/pool_configurator.py
+index 50c3733..0109199 100644
+--- a/python/sglang/srt/model_executor/pool_configurator.py
++++ b/python/sglang/srt/model_executor/pool_configurator.py
+@@ -178,6 +178,15 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
+         model_config = mr.model_config
+         kv_cache_dtype = mr.kv_cache_dtype
+
++        if mr.server_args.spry_uq_backend == "spry_uq_rdna4":
++            if model_config.head_dim not in (64, 128, 256):
++                raise ValueError("Spry-UQ has no cache-cell size for this head dimension.")
++            head_num = model_config.get_num_kv_heads(get_attention_tp_size())
++            # K and V each have 17 bytes per 32 channels; validity is one
++            # uint8 per physical slot and layer. This matches allocation,
++            # including the reserved page slots that the caller adds.
++            return num_layers * (2 * head_num * 17 * (model_config.head_dim // 32) + 1)
++
+         kv_size = torch._utils._element_size(kv_cache_dtype)
+         tp_size = get_attention_tp_size()
+ 
