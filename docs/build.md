@@ -91,3 +91,36 @@ The optional test command and launch example are in
 [qualification.md](qualification.md). They require explicit owner authorization.
 Normal CTest never runs them. Missing GPU dependencies produce a failure or
 NOT RUN status; they cannot become a successful GPU test.
+
+## GitHub Actions checks
+
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`:
+
+- The CPU job uses GitHub-hosted `ubuntu-24.04` and ARM64 `macos-15` runners.
+  It selects Python 3.11, records tool versions, builds with HIP explicitly off,
+  and runs the permanent CTest suite without a test-result cache.
+- The source-overlay job reads the SGLang revision from `sources.lock.json`,
+  retrieves that exact public commit, and runs the integrity-checked preparation
+  script. It parses patched Python files without importing them and checks the
+  resulting source diff. It does not execute SGLang.
+
+Actions are pinned to full commit SHAs. Jobs have read-only repository
+permissions, do not persist checkout credentials, and run on hosted machines.
+They do not access repository secrets, upload private evidence, publish packages,
+download model weights, install SGLang dependencies, or use a GPU. Failed tests
+appear in the job log. A newer run for the same ref cancels an older run.
+
+Hosted runner tools and the selected Python 3.11 patch version can change.
+The logged versions identify each run; CI does not define a reproducible ROCm
+environment. Green checks establish only CPU correctness and source preparation,
+not HIP compilation, GPU numerics, SGLang execution or model qualification.
+
+With an already available `actionlint`, validate workflow syntax locally:
+
+```sh
+actionlint .github/workflows/ci.yml
+```
+
+Changes take effect only after the workflow is pushed to GitHub. Required-check
+or branch-protection settings are separate owner decisions. Remove the workflow
+in a reviewed change to stop these checks; no runtime setting changes are needed.

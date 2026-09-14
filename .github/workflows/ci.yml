@@ -1,0 +1,127 @@
+name: CPU and source checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  cpu:
+    name: CPU reference (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - name: Check out runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+
+      - name: Select Python
+        id: python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Record prepared tool versions
+        shell: bash
+        run: |
+          c++ --version
+          cmake --version
+          ninja --version
+          python --version
+
+      - name: Configure CPU only
+        env:
+          CI_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: cmake --preset cpu -DSPRY_BUILD_HIP=OFF -DPython3_EXECUTABLE:FILEPATH="$CI_PYTHON"
+
+      - name: Build CPU library
+        run: cmake --build --preset cpu --parallel 2
+
+      - name: Run permanent CPU regression tests
+        run: ctest --preset cpu --timeout 120
+
+  source-overlay:
+    name: Pinned SGLang source overlay (no execution)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          clean: false
+
+      - name: Select Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Read the locked upstream revision
+        id: sglang
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          source = json.loads(Path("sources.lock.json").read_text())["sglang"]
+          if source["origin"] != "https://github.com/sgl-project/sglang.git":
+              raise SystemExit("unexpected SGLang source origin")
+          if re.fullmatch(r"[0-9a-f]{40}", source["commit"]) is None:
+              raise SystemExit("SGLang source must use a full commit SHA")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"commit={source['commit']}", file=output)
+          PY
+
+      - name: Check out pinned upstream without running its code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: sgl-project/sglang
+          ref: ${{ steps.sglang.outputs.commit }}
+          path: .sources/upstream
+          persist-credentials: false
+          clean: false
+
+      - name: Verify integrity and prepare a fresh patched checkout
+        run: python tools/prepare_sglang.py --source .sources/upstream --output .sources/candidate
+
+      - name: Check patched Python syntax without imports or execution
+        run: |
+          python - <<'PY'
+          import ast
+          import subprocess
+          from pathlib import Path
+
+          candidate = Path(".sources/candidate")
+          changed = subprocess.check_output(
+              ["git", "-C", str(candidate), "diff", "--no-ext-diff", "--name-only"],
+              text=True,
+          ).splitlines()
+          paths = [candidate / name for name in changed if name.endswith(".py")]
+          paths.extend((candidate / "python/spry_uq").glob("*.py"))
+          if not paths:
+              raise SystemExit("no prepared Python source was found")
+          for path in sorted(paths):
+              ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+          print(f"Checked {len(paths)} prepared Python files; SGLang execution NOT RUN")
+          PY
+
+      - name: Check applied-source whitespace
+        run: git -C .sources/candidate diff --no-ext-diff --check
